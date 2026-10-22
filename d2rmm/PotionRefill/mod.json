@@ -1,0 +1,42 @@
+{
+  "name": "Potion Refill",
+  "description": "When you drink a potion from your belt, a matching potion from your inventory moves into the same belt column. Needs D2RLoader and the d2rl-potion-refill.dll plugin copied into <game>\\d2rloader\\plugins (D2RMM cannot install DLLs). Launch the game with D2RLoader using D2RMM's output mod.",
+  "author": "Juan",
+  "website": "https://github.com/Juan-Pablo-Barrientos/d2r-potion-refill",
+  "version": "0.2.0",
+  "config": [
+    {
+      "id": "enabled",
+      "type": "checkbox",
+      "name": "Enabled",
+      "description": "Refill the belt column you drink from.",
+      "defaultValue": true
+    },
+    {
+      "id": "match",
+      "type": "select",
+      "name": "Matching",
+      "description": "Which inventory potions can refill a belt column.",
+      "defaultValue": "family",
+      "options": [
+        {
+          "label": "Same kind",
+          "value": "family",
+          "description": "Any healing potion refills healing, any mana potion refills mana, any rejuvenation potion refills rejuvenation. The same potion is used first, then the closest size."
+        },
+        {
+          "label": "Exact potion",
+          "value": "exact",
+          "description": "Only the same potion, such as Super Healing for Super Healing."
+        }
+      ]
+    },
+    {
+      "id": "logRefills",
+      "type": "checkbox",
+      "name": "Log refills",
+      "description": "Write every refill to d2rloader\\logs\\potion-refill.log.",
+      "defaultValue": false
+    }
+  ]
+}

@@ -24,6 +24,22 @@ can't create or duplicate items.
 
 To remove it, delete the DLL.
 
+### With D2RMM
+
+If you manage mods with [D2RMM](https://github.com/olegbl/d2rmm),
+download `PotionRefill-D2RMM.zip` instead. It contains a D2RMM mod with the
+plugin's settings and a copy of the DLL.
+
+1. Install [D2RLoader](https://d2rloader.net).
+2. Copy `d2rl-potion-refill.dll` from the zip into
+   `<game folder>\d2rloader\plugins\`. D2RMM can only write inside its own
+   output mod, so it can't place the DLL where D2RLoader loads plugins. You
+   only need to do this once, and again when the plugin updates.
+3. Extract the `PotionRefill` folder into D2RMM's `mods` folder. Enable it,
+   choose your settings, and click **Install Mods**.
+4. Start the game with D2RLoader using D2RMM's output mod. For example, set
+   `default_mod = "D2RMM"` in `d2rloader\config\d2rloader.toml`.
+
 ## Settings
 
 The first launch creates `<game folder>\d2rloader\config\potion-refill.toml`:
@@ -39,6 +55,11 @@ match = "family"
 # Write every refill to d2rloader\logs\potion-refill.log.
 log_refills = false
 ```
+
+A mod can override these settings by shipping
+`data\d2rloader\potion-refill\settings.toml` with the same keys. The D2RMM mod
+writes this file. When the plugin finds it, the log says
+`Using settings from the active mod`.
 
 ## When it does nothing
 
@@ -67,7 +88,10 @@ You need Visual Studio 2022 with the C++ desktop tools and a Windows 10/11 SDK.
 .\build.ps1                 # builds build\d2rl-potion-refill.dll
 .\build.ps1 -Install        # also copies it into the game's plugin folder
 .\build.ps1 -Install -GameDir "E:\Games\Diablo II Resurrected"
+.\package.ps1               # builds dist\ with the DLL and the D2RMM zip
 ```
+
+The D2RMM mod's source is in `d2rmm/PotionRefill`.
 
 The D2RLoader plugin SDK headers are included in `third_party/PluginSDK`
 (MIT license).

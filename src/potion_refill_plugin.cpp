@@ -9,6 +9,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 
 // Refills the belt column a potion was drunk from with a matching potion from
 // the normal inventory. The refill uses the same two client requests as a manual
@@ -20,7 +21,7 @@ static constexpr D2RL::PluginInfo PotionRefillPluginInfo {
 	.abiVersion  = D2RL_PLUGIN_ABI_VERSION,
 	.id          = "potion-refill",
 	.name        = "Potion Refill",
-	.version     = "0.1.0",
+	.version     = "0.2.0",
 	.author      = "Juan",
 	.description = "Refills the belt column you drink from with a matching potion from your inventory.",
 	.flags       = D2RL::PluginFlags::Client,
@@ -202,19 +203,7 @@ static auto ReadValue(const char* line, const char* key) noexcept -> const char*
 	return *rest == '=' ? TrimLeft(rest + 1) : nullptr;
 }
 
-static void LoadConfig() noexcept {
-	config = {};
-	if (!plugin->EnsureConfig(DefaultConfig)) {
-		plugin->LogWarn("Could not create the default config. Using defaults.");
-		return;
-	}
-
-	char text[4'096] {};
-	if (!plugin->ReadConfig(text, sizeof(text))) {
-		plugin->LogWarn("Could not read the config. Using defaults.");
-		return;
-	}
-
+static void ApplyConfigText(char* text) noexcept {
 	char* context = nullptr;
 	for (char* line = strtok_s(text, "\r\n", &context); line != nullptr; line = strtok_s(nullptr, "\r\n", &context)) {
 		line = const_cast<char*>(TrimLeft(line));
@@ -225,6 +214,83 @@ static void LoadConfig() noexcept {
 		} else if (const char* logRefills = ReadValue(line, "log_refills")) {
 			config.logRefills = std::strncmp(logRefills, "true", 4) == 0;
 		}
+	}
+}
+
+static auto ReadTextFile(const wchar_t* path, char* output, DWORD outputSize) noexcept -> bool {
+	const HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (file == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	DWORD      read = 0;
+	const BOOL ok   = ReadFile(file, output, outputSize - 1, &read, nullptr);
+	CloseHandle(file);
+	output[ok ? read : 0] = 0;
+	return ok != FALSE;
+}
+
+// Mods can override the settings with data/d2rloader/potion-refill/settings.toml.
+// D2RMM writes that file into its output mod's .mpq folder.
+static auto ReadModSettings(char* output, DWORD outputSize, wchar_t (&path)[MAX_PATH]) noexcept -> bool {
+	static constexpr wchar_t SettingsPath[] = L"data\\d2rloader\\potion-refill\\settings.toml";
+
+	wchar_t bases[2][MAX_PATH] {};
+	int     baseCount = 0;
+	if (plugin->modDirectory != nullptr && plugin->modDirectory[0] != 0) {
+		std::swprintf(bases[baseCount++], MAX_PATH, L"%ls", plugin->modDirectory);
+	}
+	wchar_t exePath[MAX_PATH] {};
+	if (plugin->activeMod != nullptr && plugin->activeMod[0] != 0 && GetModuleFileNameW(nullptr, exePath, MAX_PATH) != 0) {
+		if (wchar_t* slash = std::wcsrchr(exePath, L'\\')) {
+			*slash = 0;
+			std::swprintf(bases[baseCount++], MAX_PATH, L"%ls\\mods\\%hs", exePath, plugin->activeMod);
+		}
+	}
+
+	for (int index = 0; index < baseCount; ++index) {
+		std::swprintf(path, MAX_PATH, L"%ls\\%ls", bases[index], SettingsPath);
+		if (ReadTextFile(path, output, outputSize)) {
+			return true;
+		}
+
+		wchar_t pattern[MAX_PATH] {};
+		std::swprintf(pattern, MAX_PATH, L"%ls\\*.mpq", bases[index]);
+		WIN32_FIND_DATAW found {};
+		const HANDLE     search = FindFirstFileW(pattern, &found);
+		if (search == INVALID_HANDLE_VALUE) {
+			continue;
+		}
+		bool ok = false;
+		do {
+			if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+				std::swprintf(path, MAX_PATH, L"%ls\\%ls\\%ls", bases[index], found.cFileName, SettingsPath);
+				ok = ReadTextFile(path, output, outputSize);
+			}
+		} while (!ok && FindNextFileW(search, &found));
+		FindClose(search);
+		if (ok) {
+			return true;
+		}
+	}
+	path[0] = 0;
+	return false;
+}
+
+static void LoadConfig() noexcept {
+	config = {};
+	char text[4'096] {};
+	if (!plugin->EnsureConfig(DefaultConfig)) {
+		plugin->LogWarn("Could not create the default config. Using defaults.");
+	} else if (!plugin->ReadConfig(text, sizeof(text))) {
+		plugin->LogWarn("Could not read the config. Using defaults.");
+	} else {
+		ApplyConfigText(text);
+	}
+
+	wchar_t modSettings[MAX_PATH] {};
+	if (ReadModSettings(text, sizeof(text), modSettings)) {
+		ApplyConfigText(text);
+		Logf(false, "Using settings from the active mod: %ls", modSettings);
 	}
 }
 
