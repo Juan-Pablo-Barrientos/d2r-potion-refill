@@ -24,12 +24,6 @@ can't create or duplicate items.
 
 To remove it, delete the DLL.
 
-### With D2RMM
-
-If you manage mods with [D2RMM](https://github.com/olegbl/d2rmm), use
-[Potion Refill for D2RMM](https://github.com/Juan-Pablo-Barrientos/d2r-potion-refill-d2rmm)
-instead. It lets you change the settings below in D2RMM and includes the DLL.
-
 ## Settings
 
 The first launch creates `<game folder>\d2rloader\config\potion-refill.toml`:
@@ -47,9 +41,8 @@ log_refills = false
 ```
 
 A mod can override these settings by shipping
-`data\d2rloader\potion-refill\settings.toml` with the same keys. The
-[D2RMM mod](https://github.com/Juan-Pablo-Barrientos/d2r-potion-refill-d2rmm)
-writes this file. When the plugin finds it, the log says
+`data\d2rloader\potion-refill\settings.toml` with the same keys. When the
+plugin finds it, the log says
 `Using settings from the active mod`.
 
 ## When it does nothing
