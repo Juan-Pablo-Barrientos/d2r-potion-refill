@@ -58,8 +58,14 @@ writes this file. When the plugin finds it, the log says
   and the Horadric Cube are not.
 - **Holding an item:** if an item is on your cursor, the plugin waits up to
   five seconds, then skips the refill.
-- **Several potions gone at once:** if more than one belt potion disappears
-  at the same time (death, removing the belt), it does nothing.
+- **Belt removed:** if the belt itself is removed or swapped (death too), or
+  two potions disappear from the same column at once, it does nothing.
+  Pressing several belt keys at once refills each column.
+- **Potion stacks:** with
+  [Stackable Potions](https://github.com/Juan-Pablo-Barrientos/d2r-stackable-potions),
+  drinking from a stack leaves the rest of it in the belt. The refill waits
+  1.5 seconds after a stack drink, so it never takes the slot that stack
+  goes back to.
 - **Rejected placement:** if the game rejects the belt slot, the potion goes
   back to where it was in your inventory.
 

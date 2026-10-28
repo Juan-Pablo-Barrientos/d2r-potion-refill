@@ -21,7 +21,7 @@ static constexpr D2RL::PluginInfo PotionRefillPluginInfo {
 	.abiVersion  = D2RL_PLUGIN_ABI_VERSION,
 	.id          = "potion-refill",
 	.name        = "Potion Refill",
-	.version     = "0.2.0",
+	.version     = "0.3.0",
 	.author      = "Juan",
 	.description = "Refills the belt column you drink from with a matching potion from your inventory.",
 	.flags       = D2RL::PluginFlags::Client,
@@ -63,10 +63,15 @@ static constexpr int BeltRows             = 4;
 static constexpr int BeltSlots            = BeltColumns * BeltRows;
 static constexpr int MaxInventoryPotions  = 128;
 static constexpr int MaxPendingRefills    = 16;
+// D2's native body location for the belt.
+static constexpr int32_t BeltBodyLocation = 8;
 
 // The server shifts the column down after a drink. Waiting a few frames lets
 // that update arrive before the free slot is chosen.
 static constexpr ULONGLONG SettleMs            = 120;
+// Stackable Potions puts the rest of a drunk stack back in the belt through the
+// cursor. Waiting for that keeps the refill out of the slot it needs.
+static constexpr ULONGLONG StackSettleMs       = 1'500;
 static constexpr ULONGLONG CursorBusyTimeoutMs = 5'000;
 static constexpr ULONGLONG PlaceTimeoutMs      = 1'000;
 static constexpr ULONGLONG GiveUpMs            = 3'000;
@@ -94,6 +99,7 @@ struct StoredItem {
 	uint32_t         code      = 0;
 	int32_t          x         = 0;
 	int32_t          y         = 0;
+	int32_t          quantity  = 0;
 };
 
 struct Snapshot {
@@ -103,6 +109,8 @@ struct Snapshot {
 	int        potionCount  = 0;
 	bool       cursorUsed   = false;
 	uint32_t   cursorItemId = 0;
+	// The equipped belt's runtime id, 0 without a belt.
+	uint32_t   beltId       = 0;
 };
 
 enum class RefillStage : uint32_t {
@@ -116,6 +124,7 @@ struct RefillRequest {
 	int         maxRow    = 0;
 	uint32_t    code      = 0;
 	ULONGLONG   since     = 0;
+	ULONGLONG   settle    = 0;
 	uint32_t    runtimeId = 0;
 	int32_t     sourceX   = 0;
 	int32_t     sourceY   = 0;
@@ -346,7 +355,7 @@ static auto __cdecl CaptureItem(const D2RL::PluginContext*, const D2RL::Items::I
 		return D2RL::Inventory::IterationAction::Stop;
 	}
 
-	const StoredItem stored { item->handle, item->runtimeId, item->code, item->x, item->y };
+	const StoredItem stored { item->handle, item->runtimeId, item->code, item->x, item->y, item->quantity };
 	if (item->container == D2RL::Items::ItemContainer::Belt) {
 		const int slot = BeltSlot(item);
 		if (slot >= 0) {
@@ -366,6 +375,14 @@ static auto Capture(D2RL::PlayerHandle player, Snapshot* snapshot) noexcept -> b
 	};
 	if (inventory->forEachInventoryItem(plugin, player, &filter, CaptureItem, snapshot) != D2RL::Inventory::Result::Success) {
 		return false;
+	}
+
+	D2RL::ItemHandle belt = D2RL::InvalidItemHandle;
+	if (inventory->getEquippedItem(plugin, player, BeltBodyLocation, &belt) == D2RL::Inventory::Result::Success && belt != D2RL::InvalidItemHandle) {
+		D2RL::Items::ItemInfo info { .structSize = D2RL::Items::ItemInfoSize };
+		if (items->getItemInfo(plugin, belt, &info) == D2RL::Items::Result::Success) {
+			snapshot->beltId = info.runtimeId;
+		}
 	}
 
 	D2RL::ItemHandle cursor = D2RL::InvalidItemHandle;
@@ -413,10 +430,13 @@ static void PopRefill() noexcept {
 }
 
 // A drink removes one belt potion without moving it anywhere the player can see.
-// Several items vanishing at once (death, removing the belt) is ignored.
+// Each belt hotkey drinks from its own column, so pressing 1 and 2 together can
+// empty two columns in one update. Two potions leaving one column, or the belt
+// itself leaving (death, removing or swapping it), is not a drink.
 static void DetectDrink(const Snapshot& now, ULONGLONG time) noexcept {
-	int vanishedSlot  = -1;
-	int vanishedCount = 0;
+	int  vanished[BeltColumns] {};
+	int  vanishedCount = 0;
+	bool columnUsed[BeltColumns] {};
 	for (int slot = 0; slot < BeltSlots; ++slot) {
 		if (!previous.beltUsed[slot]) {
 			continue;
@@ -425,26 +445,36 @@ static void DetectDrink(const Snapshot& now, ULONGLONG time) noexcept {
 		if (FindInBelt(now, id) >= 0 || InInventory(now, id) || OnCursor(now, id)) {
 			continue;
 		}
-		vanishedSlot = slot;
-		++vanishedCount;
+		if (columnUsed[slot % BeltColumns]) {
+			return;
+		}
+		columnUsed[slot % BeltColumns] = true;
+		vanished[vanishedCount++]      = slot;
 	}
-	if (vanishedCount != 1 || ClassifyPotion(previous.belt[vanishedSlot].code).family == 0 || pendingCount == MaxPendingRefills) {
+	if (vanishedCount == 0 || previous.beltId != now.beltId) {
 		return;
 	}
 
-	const int column = vanishedSlot % BeltColumns;
-	int       maxRow = 0;
-	for (int row = 0; row < BeltRows; ++row) {
-		if (previous.beltUsed[row * BeltColumns + column]) {
-			maxRow = row;
+	for (int index = 0; index < vanishedCount && pendingCount < MaxPendingRefills; ++index) {
+		const StoredItem& drunk = previous.belt[vanished[index]];
+		if (ClassifyPotion(drunk.code).family == 0) {
+			continue;
 		}
+		const int column = vanished[index] % BeltColumns;
+		int       maxRow = 0;
+		for (int row = 0; row < BeltRows; ++row) {
+			if (previous.beltUsed[row * BeltColumns + column]) {
+				maxRow = row;
+			}
+		}
+		pending[pendingCount++] = {
+			.column = column,
+			.maxRow = maxRow,
+			.code   = drunk.code,
+			.since  = time,
+			.settle = drunk.quantity >= 2 ? StackSettleMs : SettleMs,
+		};
 	}
-	pending[pendingCount++] = {
-		.column = column,
-		.maxRow = maxRow,
-		.code   = previous.belt[vanishedSlot].code,
-		.since  = time,
-	};
 }
 
 static auto ChooseSource(const Snapshot& now, uint32_t code) noexcept -> const StoredItem* {
@@ -472,7 +502,7 @@ static auto ChooseSource(const Snapshot& now, uint32_t code) noexcept -> const S
 }
 
 static void StartRefill(RefillRequest& request, const Snapshot& now, ULONGLONG time) noexcept {
-	if (time - request.since < SettleMs) {
+	if (time - request.since < request.settle) {
 		return;
 	}
 	if (now.cursorUsed) {
